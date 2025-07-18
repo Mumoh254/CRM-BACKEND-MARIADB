@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const   verifyAndRefreshToken    =   require('../middlewares/authmiddleware')
 
 const   {
   verifyToken,
@@ -7,15 +8,15 @@ const   {
   getAllUsers,
   login,
   logout,
-  resetPassword,
-  protectedRoute
-}  =  require('../conttrollers/auth/authController')
+ resetUserPassword }  =  require('../conttrollers/auth/authController')
 
 router.post('/register', register);
-// router.get('/allusers', getAllUsers);
 router.post('/login', login);
-router.post('/logout',logout);
-// router.post('/reset-password', resetPassword);
+router.post('/logout', logout);
+
+router.put('/reset-password/:id', verifyAndRefreshToken  , resetUserPassword)
+
+
 
 
 module.exports = router;

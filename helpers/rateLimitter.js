@@ -1,48 +1,53 @@
 const rateLimit = require("express-rate-limit");
 
-
-// limit   logins
-
+// ✅ Login limiter
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
-  max: 100, 
-  handler: function (req, res) {
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  handler: (req, res) => {
     return res.status(429).json({
       message: "Too many login attempts from this IP, please try again after 15 minutes"
     });
   }
 });
 
-
-// limit  password  resets 
+// ✅ Password reset limiter
 const resetPasswordLimitter = rateLimit({
-    windowMs: 15 * 60 * 1000, 
-    max: 3, 
-    handler: function (req, res) {
-      return res.status(429).json({
-        message: "Too many passwordReset attempts from this IP, please try again after 15 minutes"
-      });
-    }
-  });
-  
-  
-//   limit user   deletions
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  handler: (req, res) => {
+    return res.status(429).json({
+      message: "Too many password reset attempts from this IP, please try again after 15 minutes"
+    });
+  }
+});
 
-  const  deleteUserLimitter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 3,
-    handler: function (req, res) {
-      return res.status(429).json({
-        message: "Too many OTP request attempts from this IP, please try again after 15 minutes"
-      });
-    }
-  });
+// ✅ User deletion limiter
+const deleteUserLimitter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  handler: (req, res) => {
+    return res.status(429).json({
+      message: "Too many user deletion attempts from this IP, please try again after 15 minutes"
+    });
+  }
+});
 
-//     export  modules    for  usage 
+// ✅ OTP request limiter (missing before)
+const requestOTPLimitter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 5,
+  handler: (req, res) => {
+    return res.status(429).json({
+      message: "Too many OTP requests. Please try again later."
+    });
+  }
+});
+
+// ✅ Export all
 module.exports = {
-    loginLimiter,
-    requestOTPLimitter,
-    resetPasswordLimitter,
-    deleteUserLimitter,
-  
-}
+  loginLimiter,
+  resetPasswordLimitter,
+  deleteUserLimitter,
+  requestOTPLimitter 
+};

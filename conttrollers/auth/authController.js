@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { DateTime } = require('luxon');
 const userCache = require('../../utilities/userCache');
+const expressAsyncHandler = require('express-async-handler');
 
 const SECRET_KEY = 'InventorySecrests';
 const ACCESS_TOKEN_EXPIRES_IN = '15m';
@@ -133,31 +134,47 @@ const logout = async (req, res) => {
 };
 
 
-// Reset Password
-const resetPassword = async (req, res) => {
-  const { email, newPassword } = req.body;
 
-  if (!email || !newPassword) return res.status(400).json({ error: 'Missing fields' });
+const resetUserPassword = expressAsyncHandler(async (req, res) => {
+  const userId = req.params.id;
+  const { newPassword } = req.body;
+
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters long' });
+  }
 
   try {
-    const hashed = await bcrypt.hash(newPassword, 10);
-    const [result] = await db.query('UPDATE users SET password = ? WHERE email = ?', [hashed, email]);
-    if (!result.affectedRows) return res.status(404).json({ error: 'User not found' });
+    // Check if user exists
+    const [user] = await db.query('SELECT id FROM users WHERE id = ?', [userId]);
+    if (user.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-    userCache.del(email);
-    userCache.del(`refreshToken:${email}`);
+    // Hash the new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // Update password in DB
+    const [result] = await db.query(
+      'UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?',
+      [hashedPassword, userId]
+    );
 
     res.json({ success: true, message: 'Password reset successful' });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Password reset failed' });
+    console.error('Error resetting password:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-};
+});
+
+
+
 
 module.exports = {
   register,
   login,
   logout,
-  resetPassword,
+  resetUserPassword,
+ 
   userCache
 };

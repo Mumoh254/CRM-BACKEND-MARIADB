@@ -81,35 +81,46 @@ router.post('/create', upload.single('image'), async (req, res) => {
 
 
 // UPDATE a product
-router.put('/:id', upload.single('image'), async (req, res) => {
-  const { name, price, stock, category } = req.body;
+
+router.put('/:id', async (req, res) => {
+  const { price, stock } = req.body;
   const id = req.params.id;
 
-  if (!name || !price || !stock) {
-    return res.status(400).json({ error: 'Missing required fields' });
+  // Require at least one field
+  if (price === undefined && stock === undefined) {
+    return res.status(400).json({ error: 'Provide at least one field: price or stock' });
   }
 
-  const parsedPrice = parseFloat(price);
-  const parsedStock = parseInt(stock);
+  const fields = [];
+  const values = [];
 
-  if (isNaN(parsedPrice) || isNaN(parsedStock)) {
-    return res.status(400).json({ error: 'Invalid number format' });
+  if (price !== undefined) {
+    const parsedPrice = parseFloat(price);
+    if (isNaN(parsedPrice)) {
+      return res.status(400).json({ error: 'Invalid price format' });
+    }
+    fields.push('price = ?');
+    values.push(parsedPrice);
   }
+
+  if (stock !== undefined) {
+    const parsedStock = parseInt(stock);
+    if (isNaN(parsedStock)) {
+      return res.status(400).json({ error: 'Invalid stock format' });
+    }
+    fields.push('stock = ?');
+    values.push(parsedStock);
+  }
+
+  values.push(id); // for WHERE clause
+
+  const query = `UPDATE products SET ${fields.join(', ')} WHERE id = ?`;
 
   try {
-    let query, params;
-    if (req.file) {
-      const image = req.file.filename;
-      query = `UPDATE products SET name = ?, category = ?, price = ?, stock = ?, image = ? WHERE id = ?`;
-      params = [name, category, parsedPrice, parsedStock, image, id];
-    } else {
-      query = `UPDATE products SET name = ?, category = ?, price = ?, stock = ? WHERE id = ?`;
-      params = [name, category, parsedPrice, parsedStock, id];
-    }
-
-    const [result] = await db.query(query, params);
+    const [result] = await db.query(query, values);
     myCache.del('products');
-    res.json({ success: true });
+
+    res.json({ success: true, updatedFields: fields.map(f => f.split(' ')[0]) });
   } catch (err) {
     console.error('PUT /products/:id error:', err);
     res.status(500).json({ error: 'Error updating product' });
