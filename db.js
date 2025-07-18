@@ -20,19 +20,13 @@ async function initializeDatabase() {
 
     // Create sales table
     await db.query(`
-  CREATE TABLE IF NOT EXISTS sales (
+  CREATE TABLE IF NOT EXISTS products (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  sale_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-  total DECIMAL(10,2),
-  payment_method VARCHAR(100),
-  customer_email VARCHAR(255),
-  customer_name VARCHAR(255),
-  customer_phone VARCHAR(20),
-  customer_latitude DECIMAL(10,7),
-  customer_longitude DECIMAL(10,7),
-  items TEXT,
-   user_email VARCHAR(255), 
-  amount_tendered DECIMAL(10,2),
+  name VARCHAR(255) NOT NULL,
+  image VARCHAR(500),
+  price DECIMAL(10,2) NOT NULL,
+  cost_of_goods_sold DECIMAL(10,2) DEFAULT 0,
+  category_id INT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

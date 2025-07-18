@@ -36,6 +36,7 @@ const register = async (req, res) => {
 };
 
 // Login
+
 const login = async (req, res) => {
   const email = req.body.email?.toLowerCase();
   const password = req.body.password;
@@ -85,28 +86,52 @@ res.cookie('refreshToken', refreshToken, {
 // Logout
 const logout = async (req, res) => {
   const email = req.body.email?.toLowerCase();
-  if (!email) return res.status(400).json({ error: 'Missing email' });
+  if (!email) {
+    return res.status(400).json({ error: 'Missing email' });
+  }
 
   try {
-    const [sessions] = await db.query('SELECT id, login_time FROM user_sessions WHERE user_email = ? AND logout_time IS NULL ORDER BY login_time DESC LIMIT 1', [email]);
-    if (!sessions.length) return res.status(404).json({ error: 'No active session' });
+    // Get the most recent active session
+    const [sessions] = await db.query(
+      'SELECT id, login_time FROM user_sessions WHERE user_email = ? AND logout_time IS NULL ORDER BY login_time DESC LIMIT 1',
+      [email]
+    );
+
+    if (!sessions.length) {
+      return res.status(404).json({ error: 'No active session' });
+    }
 
     const session = sessions[0];
+
     const logoutTime = DateTime.now().toSQL({ includeOffset: false });
-    const duration = Math.round((new Date(logoutTime) - new Date(session.login_time)) / 60000);
+    const loginTime = new Date(session.login_time);
+    const logoutTimeJS = new Date(logoutTime);
 
-    await db.query('UPDATE user_sessions SET logout_time = ?, duration_minutes = ? WHERE id = ?', [logoutTime, duration, session.id]);
+    const durationMinutes = Math.round((logoutTimeJS - loginTime) / 60000);
 
+    // Update session with logout info
+    await db.query(
+      'UPDATE user_sessions SET logout_time = ?, duration_minutes = ? WHERE id = ?',
+      [logoutTime, durationMinutes, session.id]
+    );
+
+    // Clear cookies and cached token
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');
     userCache.del(`refreshToken:${email}`);
 
-    res.json({ success: true, message: 'Logged out', duration: `${duration} minutes` });
+    return res.json({
+      success: true,
+      message: 'Logged out successfully',
+      duration: `${durationMinutes} minute(s)`
+    });
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Logout failed' });
+    console.error('Logout error:', error);
+    return res.status(500).json({ error: 'Logout failed due to server error' });
   }
 };
+
 
 // Reset Password
 const resetPassword = async (req, res) => {

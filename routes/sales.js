@@ -10,12 +10,13 @@ router.post('/',      verifyAndRefreshToken   , salesController.createSale);
 
 router.post('/stkpush',   verifyAndRefreshToken   ,  salesController.initiateStkPush);
 
-router.get('/analytics',  checkAdmin   ,   verifyAndRefreshToken   , salesController.getAnalytics);
+router.get('/analytics' ,   verifyAndRefreshToken   , salesController.getAnalytics);
 
 router.patch('/stock/:id',   verifyAndRefreshToken   , salesController.updateStock);
-router.get('/sales', checkAdmin   ,   verifyAndRefreshToken    , salesController.getSales);
 
-router.get('/discounts',  checkAdmin    ,  salesController.getDiscounts);
+router.get('/sales'  ,   verifyAndRefreshToken    , salesController.getSales);
+
+// router.get('/discounts'    ,  salesController.getDiscounts);
 
 router.post('/discounts/notify', salesController.notifyDiscounts);
 

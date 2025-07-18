@@ -1,95 +1,170 @@
 const expressAsyncHandler = require('express-async-handler');
-const { DateTime } = require('luxon');
-const db = require('../../Configurations/mariaDbConfig'); 
+const { DateTime, Duration } = require('luxon');
+const db = require('../../Configurations/mariaDbConfig');
 
+// Helper to determine if a session spans across the "current" moment
+// or if it has a definitive logout_time.
+// This is crucial for determining if a user is 'active' or 'logged out' for a given day.
 const mergeSessions = (sessions) => {
-  if (!sessions.length) return [];
+    if (!sessions.length) return [];
 
-  // Sort sessions by start time
-  sessions.sort((a, b) => new Date(a.login_time) - new Date(b.login_time));
+    // Sort by login time to ensure correct merging
+    sessions.sort((a, b) => new Date(a.login_time) - new Date(b.login_time));
 
-  const merged = [];
-  let current = { 
-    start_time: new Date(sessions[0].login_time), 
-    end_time: new Date(sessions[0].logout_time) 
-  };
+    const merged = [];
+    let currentMergedSession = {
+        login_time: new Date(sessions[0].login_time),
+        logout_time: sessions[0].logout_time ? new Date(sessions[0].logout_time) : null,
+        is_active: sessions[0].logout_time === null // Is this specific session currently active?
+    };
 
-  for (let i = 1; i < sessions.length; i++) {
-    const sessionStart = new Date(sessions[i].login_time);
-    const sessionEnd = new Date(sessions[i].logout_time);
+    for (let i = 1; i < sessions.length; i++) {
+        const sessionStart = new Date(sessions[i].login_time);
+        const sessionEnd = sessions[i].logout_time ? new Date(sessions[i].logout_time) : null;
+        const sessionIsActive = sessions[i].logout_time === null;
 
-    // If sessions overlap or are adjacent (no gap between them)
-    if (sessionStart <= current.end_time) {
-      // Extend the current session end time if needed
-      if (sessionEnd > current.end_time) {
-        current.end_time = sessionEnd;
-      }
-    } else {
-      // No overlap, push current and start a new one
-      merged.push({
-        start_time: current.start_time.toISOString(),
-        end_time: current.end_time.toISOString()
-      });
-      current = { start_time: sessionStart, end_time: sessionEnd };
+        // If the new session starts before or at the end of the current merged block, merge them
+        // Consider currentMergedSession.logout_time as Date.now() if it's null (still active)
+        const currentEndForComparison = currentMergedSession.logout_time || Date.now();
+
+        if (sessionStart <= currentEndForComparison) {
+            // Merge: extend the end time if the new session goes longer
+            currentMergedSession.logout_time = (currentMergedSession.logout_time === null || sessionIsActive)
+                ? null // If either is active, the merged session is active
+                : new Date(Math.max(currentEndForComparison, sessionEnd)); // Otherwise, take the max end time
+            currentMergedSession.is_active = currentMergedSession.is_active || sessionIsActive;
+        } else {
+            // No overlap, push the current merged session and start a new one
+            merged.push({ ...currentMergedSession });
+            currentMergedSession = {
+                login_time: sessionStart,
+                logout_time: sessionEnd,
+                is_active: sessionIsActive
+            };
+        }
     }
-  }
+    merged.push({ ...currentMergedSession }); // Add the last merged session
 
-  // Push the last session
-  merged.push({
-    start_time: current.start_time.toISOString(),
-    end_time: current.end_time.toISOString()
-  });
-
-  return merged;
+    return merged;
 };
 
+
 const getUserSessionInfo = expressAsyncHandler(async (req, res) => {
-  try {
-    // Fetch all sessions for the last 7 days
-    const [rows] = await db.query(`
-      SELECT 
-        user_email,
-        login_time,
-        logout_time
-      FROM user_sessions
-      WHERE login_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-      ORDER BY user_email, login_time
-    `);
+    try {
+        const now = DateTime.now().setZone('Africa/Nairobi'); // Use Luxon for robust date handling
+        const fiveDaysAgo = now.minus({ days: 5 }).startOf('day'); // Start of 5 days ago for accurate cutoff
 
-    // Group sessions by user_email and date (yyyy-MM-dd)
-    const grouped = rows.reduce((acc, session) => {
-      const dateKey = session.login_time.toISOString
-        ? session.login_time.toISOString().slice(0, 10)
-        : new Date(session.login_time).toISOString().slice(0, 10);
+        // 1. **Auto-Delete Old Data (Older than 5 days)**
+        // Only delete sessions whose login_time is strictly older than 5 days ago
+        // and whose logout_time is also before 5 days ago, or if logout_time is null,
+        // it implies a very old, unclosed session which should probably be cleaned up.
+        // For simplicity, let's target sessions that started more than 5 days ago.
+        const deleteQuery = `
+            DELETE FROM user_sessions
+            WHERE login_time < ?
+        `;
+        // We'll also consider deleting genuinely old, unclosed sessions, but for safety,
+        // let's stick to login_time for now.
+        await db.query(deleteQuery, [fiveDaysAgo.toSQL()]);
+        console.log(`[Backend] Deleted sessions older than: ${fiveDaysAgo.toISODate()}`);
 
-      const key = `${session.user_email}_${dateKey}`;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(session);
-      return acc;
-    }, {});
 
-    // Merge sessions for each user per day
-    const mergedSessions = [];
+        // 2. **Fetch Data for the Last 5 Days**
+        // Fetch all sessions within the last 5 days
+        const [rows] = await db.query(
+            `
+            SELECT id, user_email, login_time, logout_time
+            FROM user_sessions
+            WHERE login_time >= ?
+            ORDER BY user_email, login_time
+            `,
+            [fiveDaysAgo.toSQL()]
+        );
 
-    for (const key in grouped) {
-      const [user_email, date] = key.split('_');
-      const merged = mergeSessions(grouped[key]);
+        const groupedByUserAndDay = {};
 
-      merged.forEach(session => {
-        mergedSessions.push({
-          user_email,
-          date,
-          start_time: session.start_time,
-          end_time: session.end_time,
+        rows.forEach(session => {
+            // Get the date part of the login_time to group by day
+            const loginDate = DateTime.fromJSDate(new Date(session.login_time)).toISODate();
+            const key = `${session.user_email}_${loginDate}`;
+            if (!groupedByUserAndDay[key]) {
+                groupedByUserAndDay[key] = [];
+            }
+            groupedByUserAndDay[key].push(session);
         });
-      });
-    }
 
-    res.json({ date: DateTime.now().toISODate(), users: mergedSessions });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        const results = [];
+
+        for (const key in groupedByUserAndDay) {
+            const [user_email, dateString] = key.split('_');
+            const sessionsForDay = groupedByUserAndDay[key];
+
+            const mergedBlocks = mergeSessions(sessionsForDay);
+
+            let totalMsForDay = 0;
+            let isActiveForDay = false; // Flag to check if user was 'active' on this specific day
+
+            mergedBlocks.forEach(block => {
+                const blockStart = DateTime.fromJSDate(block.login_time);
+                const blockEnd = block.logout_time ? DateTime.fromJSDate(block.logout_time) : now; // If logout_time is null, use current time
+                
+                // Only count duration that falls within the current day (dateString)
+                const dayStart = DateTime.fromISO(dateString).startOf('day');
+                const dayEnd = DateTime.fromISO(dateString).endOf('day');
+
+                const effectiveStart = DateTime.max(blockStart, dayStart);
+                const effectiveEnd = DateTime.min(blockEnd, dayEnd);
+                
+                // If the block effectively overlaps with the current day, calculate duration
+                if (effectiveEnd > effectiveStart) {
+                    totalMsForDay += effectiveEnd.diff(effectiveStart).toMillis();
+                }
+
+                // A user is 'active' for the day if any of their sessions for that day
+                // are still ongoing (logout_time is null) or if the last merged session
+                // ended after the start of that day.
+                if (block.is_active || (block.logout_time && DateTime.fromJSDate(block.logout_time) >= dayStart)) {
+                     isActiveForDay = true;
+                }
+            });
+            
+            // Refine isActiveForDay: A user is "active" *for the current day* if they have an open session,
+            // or if their last session closed *on* that day.
+            // For past days, if the logout_time is not null for all sessions, they are 'logged out'.
+            // For the current day (today), if any session has logout_time NULL, they are 'active'.
+            let finalStatus;
+            if (dateString === now.toISODate()) { // If it's today's data
+                // Check if any session is truly open right now
+                const anyOpenSession = sessionsForDay.some(s => s.logout_time === null);
+                finalStatus = anyOpenSession ? 'Active' : 'Logged Out';
+            } else { // For historical days
+                // If all sessions on this day had a logout time, they were logged out for the day
+                const allSessionsClosed = sessionsForDay.every(s => s.logout_time !== null);
+                finalStatus = allSessionsClosed ? 'Logged Out' : 'Active'; // If not all closed, implying an open session *on that day*
+            }
+
+
+            results.push({
+                user_email,
+                date: dateString,
+                totalMs: totalMsForDay,
+                status: finalStatus // Add the status
+            });
+        }
+
+        // Sort results by date descending, then by user email
+        results.sort((a, b) => {
+            const dateComparison = new Date(b.date) - new Date(a.date);
+            if (dateComparison !== 0) return dateComparison;
+            return a.user_email.localeCompare(b.user_email);
+        });
+
+        res.json({ date: now.toISODate(), sessions: results });
+
+    } catch (err) {
+        console.error("Error in getUserSessionInfo:", err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 module.exports = getUserSessionInfo;
