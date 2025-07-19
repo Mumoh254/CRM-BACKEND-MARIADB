@@ -1,0 +1,29 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    ports:
+      - "5001:5001"
+    environment:
+      - DB_HOST=mariadb
+      - DB_USER=root
+      - DB_PASSWORD=yourpassword
+      - DB_NAME=yourdbname
+    depends_on:
+      - mariadb
+    restart: always
+
+  mariadb:
+    image: mariadb:11.4
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: yourpassword
+      MYSQL_DATABASE: yourdbname
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+
+volumes:
+  mariadb_data:
