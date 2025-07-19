@@ -266,8 +266,6 @@ exports.initiateStkPush = async (req, res) => {
 // Controller Function: Get Analytics
 // GET /api/sales/analytics
 // ======================
-
-
 exports.getAnalytics = async (req, res) => {
   const { range = 'daily' } = req.query;
   let dateCondition = '';
@@ -283,7 +281,7 @@ exports.getAnalytics = async (req, res) => {
     case 'weekly':
       dateCondition = 'sale_date >= CURDATE() - INTERVAL 7 DAY';
       groupByDateFormat = 'YEARWEEK(sale_date, 1)';
-      dateFormat = '%Y-W%U';
+      dateFormat = '%Y-W%u'; // Changed from %U to %u for ISO week
       break;
     case 'monthly':
       dateCondition =
@@ -300,7 +298,7 @@ exports.getAnalytics = async (req, res) => {
   try {
     const todaySales = await getQuery(`
       SELECT
-        IFNULL(SUM(total), 0) AS totalSales,
+        IFNULL(SUM(total_amount), 0) AS totalSales,
         COUNT(*) AS transactions
       FROM sales
       WHERE ${dateCondition}
@@ -336,7 +334,7 @@ exports.getAnalytics = async (req, res) => {
     `);
 
     const paymentMethods = await allQuery(`
-      SELECT payment_method, COUNT(*) AS transactions, SUM(total) AS totalRevenue
+      SELECT payment_method, COUNT(*) AS transactions, SUM(total_amount) AS totalRevenue
       FROM sales
       WHERE ${dateCondition}
       GROUP BY payment_method
@@ -347,7 +345,7 @@ exports.getAnalytics = async (req, res) => {
       SELECT
         s.customer_email,
         COUNT(s.id) AS transactionCount,
-        SUM(s.total) AS lifetimeValue,
+        SUM(s.total_amount) AS lifetimeValue,
         SUM(item.qty) AS totalProducts
       FROM sales s
       JOIN JSON_TABLE(s.items, '$[*]' COLUMNS (
@@ -363,7 +361,7 @@ exports.getAnalytics = async (req, res) => {
     const revenueTrends = await allQuery(`
       SELECT
         DATE_FORMAT(sale_date, '${dateFormat}') AS date,
-        SUM(total) AS revenue
+        SUM(total_amount) AS revenue
       FROM sales
       WHERE ${dateCondition}
       GROUP BY ${groupByDateFormat}
@@ -418,7 +416,7 @@ exports.getAnalytics = async (req, res) => {
     const peakHour = await getQuery(`
       SELECT
         HOUR(sale_date) AS hour,
-        SUM(total) AS revenue,
+        SUM(total_amount) AS revenue,
         COUNT(*) AS transactions
       FROM sales
       WHERE ${dateCondition}
@@ -513,29 +511,30 @@ exports.updateStock = async (req, res) => {
 // Controller Function: Get All Sales
 // GET /api/sales/sales
 // ======================
+
+
 exports.getSales = async (req, res) => {
     const conn = await db.getConnection();
     try {
-        const [sales] = await conn.query(`
-            SELECT
-                SELECT
-                s.id, -- Use 'id' from sales table
-                s.sale_date,
-                s.total_amount, -- Use total_amount as 'total'
-                s.payment_method,
-                s.customer_email,
-                s.customer_name,
-                s.customer_phone,
-                s.customer_latitude,
-                s.customer_longitude,
-                s.amount_tendered,
-                s.transaction_id,
-                s.items, -- Fetch the JSON items directly
-                u.email AS user_email -- Fetch user_email from users table via join
-            FROM sales s
-            JOIN users u ON s.user_id = u.id -- Join with users table
-            ORDER BY s.sale_date DESC
-        `);
+      const [sales] = await conn.query(`
+    SELECT
+        s.id, -- Use 'id' from sales table
+        s.sale_date,
+        s.total_amount, -- Use total_amount as 'total'
+        s.payment_method,
+        s.customer_email,
+        s.customer_name,
+        s.customer_phone,
+        s.customer_latitude,
+        s.customer_longitude,
+        s.amount_tendered,
+        s.transaction_id,
+        s.items, -- Fetch the JSON items directly
+        u.email AS user_email -- Fetch user_email from users table via join
+    FROM sales s
+    JOIN users u ON s.user_id = u.id -- Join with users table
+    ORDER BY s.sale_date DESC
+`);
 
         // Parse JSON items back into objects for each sale
         const formattedSales = sales.map(sale => ({
