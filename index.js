@@ -21,7 +21,7 @@ const moment = require('moment');
 
 // Express App Initialization
 const app = express();
-const PORT = process.env.PORT || 5002;
+const PORT = process.env.PORT || 5001;
 
 const HOST = '0.0.0.0';
 
@@ -73,6 +73,7 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // --- M-Pesa STK Push ---
+
 app.post("/api/mpesa/stk-push", async (req, res) => {
   const { phone, amount } = req.body;
 
@@ -165,38 +166,16 @@ const getAccessToken = async () => {
 };
 
 
+const initializeDatabase  = require('./db');
 
-// Routes
-try {
-  const mpesaRoutes = require('./routes/mpesa');
-  const productRoutes = require('./routes/products');
-  const salesRoutes = require('./routes/sales');
-  const authRoutes = require('./routes/auth');
-  const  userSesionRoutes   =  require('./routes/userSessionsRoute')
+(async () => {
+  await initializeDatabase();
 
-  app.use('/api/mpesa', mpesaRoutes);
-  app.use('/api/products', productRoutes);
-  app.use('/api/sales', salesRoutes);
-  app.use('/api/auth', authRoutes);
-  app.use('/api/auth',userSesionRoutes );
+})();
 
-  app.get('/api/status', (req, res) => {
-    res.json({
-      status: 'running',
-      pid: process.pid,
-      uploadsDir: UPLOADS_DIR,
-    });
-  });
-
-  console.log('✅ Routes loaded');
-} catch (e) {
-  console.error(`❌ Route loading error: ${e.message}`);
-  process.exit(1);
-}
-
-// Health Check
+  // Add this to your backend server
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
+  res.status(200).send('OK');
 });
 
 // Global Error Handler

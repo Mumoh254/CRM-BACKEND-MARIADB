@@ -43,6 +43,7 @@ const allQuery = async (query, params = []) => {
 // Controller Function: Create Sale
 // POST /api/sales/
 // ======================
+
 exports.createSale = async (req, res) => {
     const {
         items,
@@ -59,6 +60,22 @@ exports.createSale = async (req, res) => {
         mpesaAmount 
     } = req.body;
 
+    // Log the incoming request for a new sale
+    console.log('📝 [SALES Creation Request] Received payload:', JSON.stringify(req.body, null, 2));
+
+    // Fetch userId using userEmail (or get from req.user.id if authenticated)
+    let userId;
+    try {
+        const [userRows] = await db.query('SELECT id FROM users WHERE email = ?', [userEmail]);
+        if (userRows.length === 0) {
+            return res.status(401).json({ error: 'Authenticated user not found in database.' });
+        }
+        userId = userRows[0].id;
+    } catch (error) {
+        console.error('Error fetching user ID:', error);
+        return res.status(500).json({ error: 'Failed to retrieve user information.' });
+    }
+
     // Validate incoming data
     if (!Array.isArray(items) || items.length === 0 || !items.every((item) => item.id && item.qty > 0)) {
         return res.status(400).json({ error: 'Invalid items provided in the sale.' });
@@ -73,38 +90,44 @@ exports.createSale = async (req, res) => {
         await conn.beginTransaction(); // Start transaction
 
         const itemsWithDetails = [];
+        let calculatedTotal = 0;
         for (const item of items) {
             // Fetch product details to validate and get current price/stock
-            const [products] = await conn.query('SELECT id, name, price, stock_quantity FROM products WHERE id = ?', [item.id]);
+            const [products] = await conn.query('SELECT id, name, price, stock FROM products WHERE id = ?', [item.id]);
             const product = products[0];
 
             if (!product) {
                 throw new Error(`Product with ID ${item.id} not found.`);
             }
-            if (product.stock_quantity < item.qty) { // Use stock_quantity from schema
-                throw new Error(`Insufficient stock for ${product.name}. Available: ${product.stock_quantity}, Requested: ${item.qty}.`);
+            if (product.stock < item.qty) { // Use stock_quantity from schema
+                throw new Error(`Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${item.qty}.`);
             }
+
+            const itemTotalPrice = parseFloat(product.price) * item.qty;
+            calculatedTotal += itemTotalPrice;
 
             itemsWithDetails.push({
                 productId: product.id,
                 name: product.name,
                 price: parseFloat(product.price),
                 qty: item.qty,
-                total: parseFloat(product.price) * item.qty,
+                total: itemTotalPrice,
+                costPrice: parseFloat(product.cost_price || 0)
+                //total: parseFloat(product.price) * item.qty,
             });
         }
 
         // Recalculate total on backend to prevent tampering
-        const calculatedTotal = itemsWithDetails.reduce((sum, item) => sum + item.total, 0);
+        //const calculatedTotal = itemsWithDetails.reduce((sum, item) => sum + item.total, 0);
         if (Math.abs(calculatedTotal - total) > 0.01) { // Allow small float deviation
             throw new Error(`Total mismatch. Calculated: ${calculatedTotal.toFixed(2)}, Received: ${total.toFixed(2)}.`);
         }
 
         // Determine the final payment method string for the sales record
         let finalPaymentMethod = paymentMethod;
-        let finalAmountTendered = null;
+        let finalAmountTendered = calculatedTotal;
 
-        if (paymentMethod === 'cash') {
+        /*if (paymentMethod === 'cash') {
             finalAmountTendered = parseFloat(amountTendered) || total;
         } else if (paymentMethod === 'mpesa') {
             finalAmountTendered = total; // M-Pesa usually pays exact amount
@@ -112,14 +135,26 @@ exports.createSale = async (req, res) => {
             finalPaymentMethod = `split_cash_mpesa`; // Indicate split payment in DB
             finalAmountTendered = (parseFloat(cashAmount || 0) + parseFloat(mpesaAmount || 0));
         }
+*/
+
+        if (paymentMethod === 'cash' && amountTendered !== undefined && amountTendered !== null) {
+          console.log(`💰 [CASH Payment] New cash sale for ${customerName}, total: ${total}, tendered: ${amountTendered}`);
+            finalAmountTendered = parseFloat(amountTendered);
+        } else if (paymentMethod === 'split') {
+            const cashPart = parseFloat(cashAmount || 0);
+            const mpesaPart = parseFloat(mpesaAmount || 0);
+            finalAmountTendered = cashPart + mpesaPart;
+            console.log(`💱 [SPLIT Payment - Cash] Cash portion for ${customerName}, tendered: ${amountTendered}, full total: ${total}`);
+        }
 
         // Insert into the sales table
-        const [saleResult] = await conn.query(
+        /*const [saleResult] = await conn.query(
             `INSERT INTO sales (
-                items, total, payment_method, customer_email, customer_name,
+                items, price, payment_method, customer_email, customer_name,
                 customer_phone, customer_latitude, customer_longitude,
                 amount_tendered, sale_date, user_email
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+
             [
                 JSON.stringify(itemsWithDetails), // Store items as JSON string
                 total,
@@ -133,11 +168,33 @@ exports.createSale = async (req, res) => {
                 new Date().toISOString().slice(0, 19).replace('T', ' '), // Format to 'YYYY-MM-DD HH:MM:SS' for MariaDB TIMESTAMP
                 userEmail || null
             ]
+        );*/
+         const [saleResult] = await conn.query(
+            `INSERT INTO sales (
+                user_id, total_amount, payment_method, customer_email, customer_name,
+                customer_phone, customer_latitude, customer_longitude,
+                amount_tendered, sale_date, items, transaction_id -- Added transaction_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // 12 placeholders for 12 columns
+
+            [
+                userId, // user_id
+                calculatedTotal, // total_amount
+                finalPaymentMethod, // payment_method
+                customerEmail || null, // customer_email
+                customerName || null, // customer_name
+                customerPhone || null, // customer_phone
+                customerLatitude || null, // customer_latitude
+                customerLongitude || null, // customer_longitude
+                finalAmountTendered, // amount_tendered
+                new Date().toISOString().slice(0, 19).replace('T', ' '), // sale_date
+                JSON.stringify(itemsWithDetails), // items (JSON)
+                (paymentMethod === 'mpesa' && req.body.mpesaTransactionId) ? req.body.mpesaTransactionId : null // transaction_id
+            ]
         );
 
         // Update product stock quantities
         for (const item of items) {
-            await conn.query('UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?', [item.qty, item.id]);
+            await conn.query('UPDATE products SET stock = stock - ? WHERE id = ?', [item.qty, item.id]);
         }
 
         await conn.commit(); // Commit the transaction
@@ -145,9 +202,11 @@ exports.createSale = async (req, res) => {
         res.json({
             success: true,
             saleId: saleResult.insertId,
-            total,
-            change: paymentMethod === 'cash' && amountTendered ? amountTendered - total : 0,
+            total: calculatedTotal,
+            change: (paymentMethod === 'cash' && finalAmountTendered) ? finalAmountTendered - calculatedTotal : 0,
             message: 'Order processed successfully!'
+            //change: paymentMethod === 'cash' && amountTendered ? amountTendered - total : 0,
+            //message: 'Order processed successfully!'
         });
     } catch (err) {
         await conn.rollback(); // Rollback on error
@@ -200,6 +259,7 @@ exports.initiateStkPush = async (req, res) => {
         res.status(500).json({ error: 'Failed to initiate STK Push. Please try again later.' });
     }
 };
+
 
 // ======================
 // Controller Function: Get Analytics

@@ -19,19 +19,26 @@ async function initializeDatabase() {
     `);
 
     // Create sales table
-    await db.query(`
-  CREATE TABLE IF NOT EXISTS products (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  image VARCHAR(500),
-  price DECIMAL(10,2) NOT NULL,
-  cost_of_goods_sold DECIMAL(10,2) DEFAULT 0,
-  category_id INT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
-    `);
+   await db.query(`
+  CREATE TABLE IF NOT EXISTS sales (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL, -- Link to the users table
+    total_amount DECIMAL(10, 2) NOT NULL,
+    payment_method VARCHAR(50) NOT NULL,
+    customer_email VARCHAR(255),
+    customer_name VARCHAR(255),
+    customer_phone VARCHAR(50),
+    customer_latitude DECIMAL(10,8), -- Added based on your query
+    customer_longitude DECIMAL(11,8), -- Added based on your query
+    amount_tendered DECIMAL(10,2), -- Added based on your query
+    transaction_id VARCHAR(255) UNIQUE, -- For M-Pesa
+    sale_date DATETIME DEFAULT CURRENT_TIMESTAMP, -- Changed to sale_date as per your query
+    items JSON NOT NULL, -- Keep items as JSON
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, -- Keep for general record-keeping
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+`);
 
     // Create users table
  
