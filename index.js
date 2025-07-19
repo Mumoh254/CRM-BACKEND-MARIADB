@@ -23,7 +23,7 @@ const moment = require('moment');
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-const HOST = 'localhost';
+const HOST = '0.0.0.0';
 
 
 
