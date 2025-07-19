@@ -21,21 +21,35 @@ const moment = require('moment');
 
 // Express App Initialization
 const app = express();
-const PORT = process.env.PORT || 5001;
-const HOST = process.env.HOST || '0.0.0.0';
+const PORT = process.env.PORT || 5002;
+
+const HOST = 'localhost';
+
 
 
 const cookieParser = require('cookie-parser');
 app.use(cookieParser());
 
-// CORS Options
+const allowedOrigins = [
+  'https://crmstocklink.netlify.app',
+  'http://localhost:3000'
+];
+
 const corsOptions = {
-  origin: 'http://localhost:3000', 
+  origin: function(origin, callback) {
+    // allow requests with no origin like Postman or curl
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  credentials: false
 };
-
 
 
 // Middleware

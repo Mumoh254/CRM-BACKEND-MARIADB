@@ -1,11 +1,19 @@
 require('dotenv').config();
 const mysql = require('mysql2/promise');
+const { URL } = require('url');
+
+// Your MariaDB URI
+const dbUrl = 'mariadb://CRMSOFTWARE_chickenits:a5910489a329f3872117e9e71ad8fc593c1e4ee0@lmq-zm.h.filess.io:3305/CRMSOFTWARE_chickenits';
+
+// Parse the URL
+const parsedUrl = new URL(dbUrl);
 
 const db = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'CRMSOFTWARE',
+  host: parsedUrl.hostname,
+  port: parsedUrl.port,
+  user: parsedUrl.username,
+  password: parsedUrl.password,
+  database: parsedUrl.pathname.replace('/', ''), // remove leading slash
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
