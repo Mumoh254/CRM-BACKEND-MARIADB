@@ -6,15 +6,15 @@ const dbUrl = 'mariadb://CRMSOFTWARE_chickenits:a5910489a329f3872117e9e71ad8fc59
 
 const parsedUrl = new URL(dbUrl);
 
-const db = mysql.createPool({
-  host: parsedUrl.hostname,              // lmq-zm.h.filess.io
-  port: parseInt(parsedUrl.port),        // 3305
-  user: parsedUrl.username,              // CRMSOFTWARE_chickenits
-  password: parsedUrl.password,          // your secure password
-  database: parsedUrl.pathname.slice(1), // removes the leading '/'
+const pool = mysql.createPool({
+  host: parsedUrl.hostname,
+  port: parseInt(parsedUrl.port),
+  user: parsedUrl.username,
+  password: parsedUrl.password,
+  database: parsedUrl.pathname.slice(1),
   waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
+  connectionLimit: 2,
+  queueLimit: 0
 });
 
-module.exports = db;
+module.exports = pool;

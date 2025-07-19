@@ -21,7 +21,7 @@ const moment = require('moment');
 
 // Express App Initialization
 const app = express();
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5002;
 
 const HOST = '0.0.0.0';
 
@@ -64,6 +64,19 @@ app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
 console.log('✅ Middleware configured');
+
+
+const db = require('./Configurations/mariaDbConfig');
+
+(async () => {
+  try {
+    const [rows] = await db.query('SELECT NOW() AS now');
+    console.log('✅ Database initialized:', rows[0]);
+  } catch (err) {
+    console.error('❌ Error initializing database:', err);
+  }
+})();
+
 
 // uploads directory 
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
@@ -165,13 +178,6 @@ const getAccessToken = async () => {
   }
 };
 
-
-const initializeDatabase  = require('./db');
-
-(async () => {
-  await initializeDatabase();
-
-})();
 
 
 // Routes
