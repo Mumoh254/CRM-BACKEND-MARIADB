@@ -2,6 +2,9 @@
 const db = require('../../Configurations/mariaDbConfig'); // Assuming this correctly imports your MariaDB connection pool
 const NodeCache = require('node-cache');
 const nodemailer = require('nodemailer');
+const jwt = require('jsonwebtoken');
+const dotenv = require('dotenv');
+dotenv.config();
 // const { generateReceiptPDF } = require('../../utils/receipt'); // Uncomment if these utilities exist and are needed
 // const { sendEmailWithAttachment, sendReceiptEmail } = require('../../utils/email'); // Uncomment if these utilities exist and are needed
 // const fs = require('fs'); // Uncomment if file system operations are needed
@@ -43,7 +46,6 @@ const allQuery = async (query, params = []) => {
 // Controller Function: Create Sale
 // POST /api/sales/
 // ======================
-
 exports.createSale = async (req, res) => {
     const {
         items,
@@ -259,7 +261,6 @@ exports.initiateStkPush = async (req, res) => {
         res.status(500).json({ error: 'Failed to initiate STK Push. Please try again later.' });
     }
 };
-
 
 // ======================
 // Controller Function: Get Analytics
@@ -495,8 +496,8 @@ exports.updateStock = async (req, res) => {
 
     try {
         // Update stock_quantity column as per schema
-        await runQuery('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?', [quantity, id]);
-        const product = await getQuery('SELECT id, name, stock_quantity FROM products WHERE id = ?', [id]); // Fetch updated stock_quantity
+        await runQuery('UPDATE products SET stock = stock + ? WHERE id = ?', [quantity, id]);
+        const product = await getQuery('SELECT id, name, stock FROM products WHERE id = ?', [id]); // Fetch updated stock_quantity
 
         if (!product) return res.status(404).json({ error: 'Product not found.' });
 
@@ -517,25 +518,29 @@ exports.getSales = async (req, res) => {
     try {
         const [sales] = await conn.query(`
             SELECT
-                id,
-                sale_date,
-                total,
-                payment_method,
-                customer_email,
-                customer_name,
-                customer_phone,
-                customer_latitude,
-                customer_longitude,
-                amount_tendered,
-                user_email,
-                items
-            FROM sales
-            ORDER BY sale_date DESC
+                SELECT
+                s.id, -- Use 'id' from sales table
+                s.sale_date,
+                s.total_amount, -- Use total_amount as 'total'
+                s.payment_method,
+                s.customer_email,
+                s.customer_name,
+                s.customer_phone,
+                s.customer_latitude,
+                s.customer_longitude,
+                s.amount_tendered,
+                s.transaction_id,
+                s.items, -- Fetch the JSON items directly
+                u.email AS user_email -- Fetch user_email from users table via join
+            FROM sales s
+            JOIN users u ON s.user_id = u.id -- Join with users table
+            ORDER BY s.sale_date DESC
         `);
 
         // Parse JSON items back into objects for each sale
         const formattedSales = sales.map(sale => ({
             ...sale,
+            total: sale.total_amount,
             items: JSON.parse(sale.items) // Ensure 'items' is parsed correctly
         }));
 
@@ -659,4 +664,41 @@ exports.notifyDiscounts = async (req, res) => {
         console.error('Failed to send discount emails:', error.message);
         res.status(500).json({ error: 'Failed to send discount emails. Server error.' });
     }
+};
+
+exports.processSale = async (req, res) => {
+  const { items, paymentMethod } = req.body;
+
+  try {
+    for (const item of items) {
+      const [productRows] = await db.query('SELECT stock FROM products WHERE id = ?', [item.id]);
+
+      if (productRows.length === 0) {
+        return res.status(404).json({ message: `Product with ID ${item.id} not found.` });
+      }
+
+      const product = productRows[0];
+
+      if (product.stock < item.qty) {
+        return res.status(400).json({ message: `Insufficient stock for product ${item.name}.` });
+      }
+
+      // Update stock
+      await db.query(
+        'UPDATE products SET stock = stock - ? WHERE id = ?',
+        [item.qty, item.id]
+      );
+
+      // Record sale
+      await db.query(
+        'INSERT INTO sales (product_id, quantity, total_price, payment_method) VALUES (?, ?, ?, ?)',
+        [item.id, item.qty, item.qty * item.price, paymentMethod]
+      );
+    }
+
+    res.status(200).json({ message: 'Sale recorded successfully.' });
+  } catch (err) {
+    console.error('Error processing sale:', err.message);
+    res.status(500).json({ message: 'Internal server error during sale.' });
+  }
 };
